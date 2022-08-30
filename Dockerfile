@@ -16,17 +16,6 @@ WORKDIR /root
 #   Process manager
 # socat
 #   Port forwarder
-# keychain
-#   ssh-key creator
-#------------------
-# Genymotion spec
-#------------------
-# python3-setuptools
-#   PPython packaging facilitator
-# python3-wheel
-#   Python distribution
-# python3-pip
-#   Python package installer
 #------------------
 #  NoVNC Packages
 #------------------
@@ -37,8 +26,6 @@ WORKDIR /root
 #   Windows manager
 # feh
 #   ScreenBackground
-# python-xdg
-#   Required by openbox autostart function
 # menu
 #   Debian menu
 # python-numpy
@@ -52,25 +39,33 @@ WORKDIR /root
 #   Video recorder
 # jq
 #   Sed for JSON data
+#------------------
+#    KVM Package
+# for emulator x86
+# https://help.ubuntu.com/community/KVM/Installation
+#------------------
+# qemu-kvm
+# libvirt-bin
+# ubuntu-vm-builder
+# bridge-utils
 #==================
 ADD docker/configs/x11vnc.pref /etc/apt/preferences.d/
 RUN apt-get -qqy update && apt-get -qqy install --no-install-recommends \
-    xterm \ 
+    xterm \
     supervisor \
     socat \
-    keychain \
-    python3-setuptools \
-    python3-wheel \
-    python3-pip \
     x11vnc \
     openbox \
     feh \
-    python-xdg \
     menu \
     python-numpy \
     net-tools \
     ffmpeg \
     jq \
+    qemu-kvm \
+    libvirt-bin \
+    ubuntu-vm-builder \
+    bridge-utils \
  && apt clean all \
  && rm -rf /var/lib/apt/lists/*
 
@@ -91,27 +86,67 @@ RUN  wget -nv -O noVNC.zip "https://github.com/kanaka/noVNC/archive/${NOVNC_SHA}
  && rm websockify.zip \
  && ln noVNC/vnc_auto.html noVNC/index.html
 
-#================================================ 
-# noVNC Default Configurations
-# These Configurations can be changed through -e
-#================================================
+#======================
+# Install SDK packages
+#======================
+ARG ANDROID_VERSION=5.0.1
+ARG API_LEVEL=21
+ARG PROCESSOR=x86
+ARG SYS_IMG=x86
+ARG IMG_TYPE=google_apis
+ARG BROWSER=android
+ARG CHROME_DRIVER=2.40
+ARG GOOGLE_PLAY_SERVICE=12.8.74
+ARG GOOGLE_PLAY_STORE=11.0.50
 ARG APP_RELEASE_VERSION=1.5-p0
-ENV DISPLAY=:0 \
-    SCREEN=0 \
-    SCREEN_WIDTH=1600 \
-    SCREEN_HEIGHT=900 \
-    SCREEN_DEPTH=16 \
-    LOCAL_PORT=5900 \
-    TARGET_PORT=6080 \
-    TIMEOUT=1 \
-    VIDEO_PATH=/tmp/video \
-    LOG_PATH=/var/log/supervisor \
+ENV ANDROID_VERSION=$ANDROID_VERSION \
+    API_LEVEL=$API_LEVEL \
+    PROCESSOR=$PROCESSOR \
+    SYS_IMG=$SYS_IMG \
+    IMG_TYPE=$IMG_TYPE \
+    BROWSER=$BROWSER \
+    CHROME_DRIVER=$CHROME_DRIVER \
+    GOOGLE_PLAY_SERVICE=$GOOGLE_PLAY_SERVICE \
+    GOOGLE_PLAY_STORE=$GOOGLE_PLAY_STORE \
     GA=true \
     GA_ENDPOINT=https://www.google-analytics.com/collect \
     GA_TRACKING_ID=UA-133466903-1 \
     GA_API_VERSION="1" \
     APP_RELEASE_VERSION=$APP_RELEASE_VERSION \
-    APP_TYPE=Genymotion
+    APP_TYPE=Emulator
+ENV PATH ${PATH}:${ANDROID_HOME}/build-tools
+
+RUN yes | sdkmanager --licenses && \
+    sdkmanager "platforms;android-${API_LEVEL}" "system-images;android-${API_LEVEL};${IMG_TYPE};${SYS_IMG}" "emulator"
+
+#==============================================
+# Download proper version of chromedriver
+# to be able to use Chrome browser in emulator
+#==============================================
+RUN wget -nv -O chrome.zip "https://chromedriver.storage.googleapis.com/${CHROME_DRIVER}/chromedriver_linux64.zip" \
+ && unzip -x chrome.zip \
+ && rm chrome.zip
+
+#================================================================
+# Download Google Play Services APK and Play Store from apklinker
+#================================================================
+#Run wget -nv -O google_play_services.apk "https://www.apklinker.com/wp-content/uploads/uploaded_apk/5b5155e5ef4f8/com.google.android.gms_${GOOGLE_PLAY_SERVICE}-020700-204998136_12874013_MinAPI21_(x86)(nodpi)_apklinker.com.apk"
+#Run wget -nv -O google_play_store.apk "https://www.apklinker.com/wp-content/uploads/uploaded_apk/5b632b1164e31/com.android.vending_${GOOGLE_PLAY_STORE}-all-0-PR-206665793_81105000_MinAPI16_(armeabi,armeabi-v7a,mips,mips64,x86,x86_64)(240,320,480dpi)_apklinker.com.apk"
+
+#================================================
+# noVNC Default Configurations
+# These Configurations can be changed through -e
+#================================================
+ENV DISPLAY=:0 \
+    SCREEN=0 \
+    SCREEN_WIDTH=1600 \
+    SCREEN_HEIGHT=900 \
+    SCREEN_DEPTH=24+32 \
+    LOCAL_PORT=5900 \
+    TARGET_PORT=6080 \
+    TIMEOUT=1 \
+    VIDEO_PATH=/tmp/video \
+    LOG_PATH=/var/log/supervisor
 
 #================================================
 # openbox configuration
@@ -124,31 +159,12 @@ ADD src/.fehbg /root/.fehbg
 ADD src/rc.xml /etc/xdg/openbox/rc.xml
 RUN echo /root/.fehbg >> /etc/xdg/openbox/autostart
 
-#============
-# Set Locale
-#============
-ENV LC_ALL=C.UTF-8
-ENV LANG=C.UTF-8
-
-#====================
-# Install genymotion
-#====================
-RUN echo | ssh-keygen -q
-ENV GENYMOTION=true \
-    INSTANCES_PATH=/root/tmp/instances.txt \
-    APPIUM_LOG=$LOG_PATH/appium.log
-RUN pip3 install gmsaas
-COPY genymotion/generate_config.sh genymotion/geny_start.sh genymotion/enable_adb.sh /root/
-
-#===================
-# Install Terraform
-#===================
-ARG TERRAFORM_VERSION=0.11.7
-
-ENV TERRAFORM_VERSION=$TERRAFORM_VERSION
-RUN wget -nv -O terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
- && unzip -x terraform.zip \
- && rm terraform.zip
+#======================
+# Workarounds
+#======================
+# Fix emulator from crashing when running as root user.
+# See https://github.com/budtmo/docker-android/issues/223
+ENV QTWEBENGINE_DISABLE_SANDBOX=1
 
 #===============
 # Expose Ports
@@ -157,16 +173,28 @@ RUN wget -nv -O terraform.zip "https://releases.hashicorp.com/terraform/${TERRAF
 #   Appium port
 # 6080
 #   noVNC port
+# 5554
+#   Emulator port
 # 5555
 #   ADB connection port
 #===============
-EXPOSE 4723 6080 5555
+EXPOSE 4723 6080 5554 5555
 
-#=======================
-# Run docker-genymotion
-#=======================
+#======================
+# Add Emulator Devices
+#======================
+COPY devices ${ANDROID_HOME}/devices
+
+#===================
+# Run docker-appium
+#===================
 COPY src /root/src
 COPY supervisord.conf /root/
-RUN chmod -R +x /root/src && chmod +x /root/supervisord.conf /root/geny_start.sh
-RUN gmsaas config set android-sdk-path ${ANDROID_HOME}
-CMD ["./geny_start.sh"]
+RUN chmod -R +x /root/src && chmod +x /root/supervisord.conf
+
+HEALTHCHECK --interval=2s --timeout=40s --retries=1 \
+    CMD timeout 40 adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
+
+RUN ln -s ${ANDROID_HOME}/emulator/emulator /usr/bin/
+
+CMD /usr/bin/supervisord --configuration supervisord.conf
